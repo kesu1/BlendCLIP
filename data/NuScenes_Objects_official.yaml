@@ -1,0 +1,4 @@
+NAME: NuScenes_Objects
+DATA_PATH: /proj/berzelius-2023-364/data/nuscenes_objects/official_eval
+USE_HEIGHT: FALSE
+NO_MOTION: FALSE

@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
+import pytorch3d.ops as ops
 from models.pointbert import misc
 
 from knn_cuda import KNN
@@ -183,6 +184,82 @@ class Group(nn.Module):
         
         return neighborhood, center
 
+
+class GroupDynamic(nn.Module):
+    """
+    Vectorized grouping layer: FPS + k-NN with per-sample K_i.
+    Always returns G_max patch slots; padded slots are zero + masked True.
+    """
+    
+    def __init__(self, num_group_max: int, group_size: int):
+        super().__init__()
+        self.G_max = num_group_max          # upper bound on patches/pc
+        self.M     = group_size
+
+    def forward(self, pts: torch.Tensor) -> tuple:
+        """
+        xyz  : (B, N, 3[+C])  – rows ≥ length[b] are +inf
+        returns
+            neigh : (B, G_max, M, C_tot)  – zeros for padded groups
+            cent  : (B, G_max, 3)         – zeros for padded groups
+            pad   : (B, G_max) bool       – True where group is padding
+        """
+        B, N, C_tot = pts.shape
+        device      = pts.device
+
+        # real-point mask & per-cloud sizes
+        mask_real = torch.isfinite(pts[..., 0])      # (B, N)
+        lengths   = mask_real.sum(1)                 # (B,)
+
+        # per-cloud patch count k_i = floor(2·Ni / M) in [1, G_max]
+        k_i   = (2 * lengths // self.M).clamp(1, self.G_max)       # (B,)
+        K_max = int(k_i.max().item())
+
+        # FPS (PyTorch 3D: returns centres AND indices, padded to K_max)
+        cent_var, idx_cent = ops.sample_farthest_points(
+            points=pts[..., :3].contiguous(),      # (B, N, 3)
+            lengths=lengths,                # (B,)
+            K=k_i.to(torch.int64),            # (B,)
+            random_start_point=True
+        )                                   # centres (B,K_max,3), idx_cent (B,K_max)
+
+        pad_k = idx_cent.eq(-1)             # True for internal FPS padding
+
+        #  k-NN – PyTorch 3D skips rows j >= k_i[b]
+        knn_out = ops.knn_points(
+            p1=cent_var,                        # query  (B,K_max,3)
+            p2=pts[..., :3],                    # cloud  (B,N,3)
+            lengths1=k_i.to(torch.int64),       # query lengths
+            lengths2=lengths.to(torch.int64),
+            K=self.M,
+            return_nn=False,
+            return_sorted=False,
+        )
+        idx_knn = knn_out.idx               # (B,K_max,M)  – zeros where pad_k
+
+        # gather FULL channels
+        lengths[lengths < self.M] = self.M  # takes care of pts where its size < M
+        neigh_var = ops.knn_gather(
+            x=pts,                            # (B,N,C_tot)
+            idx=idx_knn,                        # (B,K_max,M)
+            lengths=lengths                         # (B,)
+        )                                   # (B,K_max,M,C_tot)
+
+        # zero out neighbourhoods of padded groups
+        neigh_var = neigh_var.masked_fill(pad_k.unsqueeze(-1).unsqueeze(-1), 0)
+        # local frame
+        neigh_var[..., :3] -= cent_var.unsqueeze(2)
+
+        # pad up to fixed G_max for the rest of the network
+        neigh = pts.new_zeros(B, self.G_max, self.M, C_tot)
+        cent  = pts.new_zeros(B, self.G_max, 3)
+        pad   = torch.ones   (B, self.G_max, dtype=torch.bool, device=device)
+
+        neigh[:, :K_max] = neigh_var
+        cent [:, :K_max] = cent_var
+        pad  [:, :K_max] = pad_k
+
+        return neigh.contiguous(), cent.contiguous(), pad
 
 class Encoder(nn.Module):
     def __init__(self, encoder_channel, input_dim=3):

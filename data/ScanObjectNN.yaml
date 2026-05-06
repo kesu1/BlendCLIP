@@ -1,0 +1,3 @@
+NAME: ScanObjectNN
+DATA_PATH: /proj/berzelius-2023-364/data/ScanObjectNN
+USE_HEIGHT: FALSE

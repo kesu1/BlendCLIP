@@ -1,0 +1,3 @@
+[submodule "models/customized_backbone/sonata"]
+	path = models/customized_backbone/sonata
+	url = https://github.com/facebookresearch/sonata.git

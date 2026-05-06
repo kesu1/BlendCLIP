@@ -8,7 +8,7 @@
   <img src="misc/cover_inference.png" alt="BlendCLIP Cover" width="70%">
 </p>
 
-> [arXiv](https://arxiv.org/abs/2510.18244) 
+**Paper:** [ [arXiv](https://arxiv.org/abs/2510.18244) ] · [ [CVF](https://openaccess.thecvf.com/content/WACV2026/papers/Khoche_BlendCLIP_Bridging_Synthetic_and_Real_Domains_for_Zero-Shot_3D_Object_WACV_2026_paper.pdf) ]
 
 BlendCLIP is a multimodal pretraining framework that **bridges this synthetic-to-real gap** by strategically combining the strengths of both domains.
 It introduces a **curriculum-based data mixing strategy** that leverages large-scale synthetic CAD models while simultaneously benefitting from real-world data.
@@ -29,11 +29,38 @@ Describes a pipeline to create multimodal *(3D-image-text)* object-centric datas
 
 ---
 
-## 📦 Code Availability
+## 💻 Code
 
-🚧 **Code is coming soon!**  
-We will release the full training and inference pipeline along with the created outdoor triplet dataset  upon acceptance.
-Stay tuned and watch this repository for updates.
+This repository contains the official implementation of our WACV 2026 paper, including code for reproducing the experiments.
+
+
+## ⚙️ Instructions
+
+### Triplets Dataset Creation
+
+To create triplet datasets from nuScenes and TruckScenes from scratch, create the `triplets` conda environment:
+
+```console
+conda env create --file environment_configs/environment_triplets.yaml
+```
+
+Relevant scripts are available in the `data/dataset_triplets` directory.
+
+### Pretraining and Experiments
+
+To run the model pretraining, reproduce ablations, and evaluation experiments, create the `triplets` conda environment:
+
+```console
+conda env create --file environment_configs/environment_blendclip.yaml
+```
+
+Relevant scripts are available in the `scripts` directory.
+
+---
+
+## 📦 Triplet Datasets Availability
+
+Coming soon to 🤗 Hugging Face!
 
 ---
 
@@ -42,12 +69,11 @@ Stay tuned and watch this repository for updates.
 If you find this work useful, please cite:
 
 ```bibtex
-@misc{khoche2025blendclipbridgingsyntheticreal,
-      title={BlendCLIP: Bridging Synthetic and Real Domains for Zero-Shot 3D Object Classification with Multimodal Pretraining}, 
-      author={Ajinkya Khoche and Gergő László Nagy and Maciej Wozniak and Thomas Gustafsson and Patric Jensfelt},
-      year={2025},
-      eprint={2510.18244},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2510.18244}, 
+@inproceedings{khoche2026blendclip,
+      title={BlendCLIP: Bridging Synthetic and Real Domains for Zero-Shot 3D Object Classification with Multimodal Pretraining},
+      author={Khoche, Ajinkya and Nagy, Gergő László and Wozniak, Maciej and Gustafsson, Thomas and Jensfelt, Patric},
+      booktitle={Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision},
+      pages={5766--5775},
+      year={2026}
 }
+```

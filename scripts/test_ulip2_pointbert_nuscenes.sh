@@ -16,7 +16,7 @@ CUDA_VISIBLE_DEVICES=0 python main.py \
 --linear-projection \
 --output-dir $output_dir \
 --evaluate_3d_ulip2 \
---validate_dataset_name objaverse_lvis_colored \
---validate_dataset_prompt modelnet40_64 \
+--validate_dataset_name nuscenes_objects_official \
+--validate_dataset_prompt outdoors_1 \
 --test_repeat 1 \
---test_ckpt_addr $model_file 2>&1 | tee $output_dir/log_LVIS.txt
+--test_ckpt_addr $model_file 2>&1 | tee $output_dir/log_nuscenes.txt

@@ -96,6 +96,12 @@ def save_on_master(state, is_best, output_dir):
 
 
 def init_distributed_mode(args):
+    if args.no_distributed:
+        print('Distributed mode disabled, using single GPU mode')
+        args.distributed = False
+        args.gpu = 0
+        return
+    
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
         args.rank = int(os.environ["RANK"])
         args.world_size = int(os.environ['WORLD_SIZE'])

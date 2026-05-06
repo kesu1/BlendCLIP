@@ -1,0 +1,3 @@
+NAME: NuScenes_Objects
+DATA_PATH: /proj/berzelius-2023-364/data/truckscenes_objects/official_eval
+USE_HEIGHT: FALSE

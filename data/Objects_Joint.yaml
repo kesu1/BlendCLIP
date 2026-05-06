@@ -1,0 +1,5 @@
+NAME: Objects_Joint
+NUSCENES_PATH: /proj/berzelius-2023-364/data/nuscenes_objects
+OBJAVERSE_PATH: /proj/berzelius-2023-364/data/Objaverse_triplets
+USE_HEIGHT: FALSE
+NO_MOTION: FALSE

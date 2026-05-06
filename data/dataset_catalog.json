@@ -16,5 +16,59 @@
         "train": "train",
         "test": "test",
         "usage": "train"
+    },
+    "nuscenes_objects": {
+        "config": "./data/NuScenes_Objects.yaml",
+        "train": "train",
+        "test": "test",
+        "usage": "test"
+    },
+    "nuscenes_objects_official": {
+        "config": "./data/NuScenes_Objects_official.yaml",
+        "train": "train",
+        "test": "test",
+        "usage": "test"
+    },
+    "nuscenes_objects_train": {
+        "config": "./data/NuScenes_Objects.yaml",
+        "train": "train",
+        "test": "test",
+        "usage": "train"
+    },
+    "objaverse": {
+        "config": "./data/Objaverse.yaml",
+        "train": "train",
+        "test": "test",
+        "usage": "train"
+    },
+    "objects_joint": {
+        "config": "./data/Objects_Joint.yaml",
+        "train": "train",
+        "test": "test",
+        "usage": "train"
+    },
+    "objects_joint_nomotion": {
+        "config": "./data/Objects_Joint_nomotion.yaml",
+        "train": "train",
+        "test": "test",
+        "usage": "train"
+    },
+    "truckscenes_objects": {
+        "config": "./data/TruckScenes_Objects.yaml",
+        "train": "train",
+        "test": "test",
+        "usage": "test"
+    },
+    "truckscenes_objects_official": {
+        "config": "./data/TruckScenes_Objects_official.yaml",
+        "train": "train",
+        "test": "test",
+        "usage": "test"
+    },
+    "scanobjectnn": {
+        "config": "./data/ScanObjectNN.yaml",
+        "train": "train",
+        "test": "test",
+        "usage": "test"
     }
 }

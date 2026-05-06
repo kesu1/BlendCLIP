@@ -130,6 +130,8 @@
         "the embroidered {}.",
         "a painting of the {}.",
         "a painting of a {}."
+    ],
+    "outdoors_1": [
+        "point cloud of a {}."
     ]
-
 }

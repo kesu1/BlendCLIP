@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from timm.models.layers import DropPath
 from models.pointbert.dvae import Group
+from models.pointbert.dvae import GroupDynamic
 from models.pointbert.dvae import Encoder
 from models.pointbert.logger import print_log
 
@@ -52,19 +53,49 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-    def forward(self, x):
+    def forward(self, x, padding_mask=None):
         B, N, C = x.shape
+        
+        # No need to handle padded values - using normal processing
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
 
         attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
+            
+        if padding_mask is not None:
+            # mask columns (keys)
+            key_mask  = padding_mask.unsqueeze(1).unsqueeze(2)  # (B,1,1,N)
+            attn = attn.masked_fill(key_mask, float('-inf'))
 
+            # softmax
+            attn = F.softmax(attn, dim=-1)
+
+            # mask rows (queries) afterwards
+            query_mask = padding_mask.unsqueeze(1).unsqueeze(3) # (B,1,N,1)
+            attn = attn.masked_fill(query_mask, 0.0)
+        else:
+            attn = F.softmax(attn, dim=-1)
+        
+        attn = self.attn_drop(attn)
+        
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
+        
         return x
+    
+        #B, N, C = x.shape
+        #qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        #q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
+
+        #attn = (q @ k.transpose(-2, -1)) * self.scale
+        #attn = attn.softmax(dim=-1)
+        #attn = self.attn_drop(attn)
+
+        #x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        #x = self.proj(x)
+        #x = self.proj_drop(x)
+        #return x
 
 
 class Block(nn.Module):
@@ -82,8 +113,8 @@ class Block(nn.Module):
         self.attn = Attention(
             dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
 
-    def forward(self, x):
-        x = x + self.drop_path(self.attn(self.norm1(x)))
+    def forward(self, x, padding_mask=None):
+        x = x + self.drop_path(self.attn(self.norm1(x), padding_mask))
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
 
@@ -104,9 +135,9 @@ class TransformerEncoder(nn.Module):
             )
             for i in range(depth)])
 
-    def forward(self, x, pos):
+    def forward(self, x, pos, padding_mask=None):
         for _, block in enumerate(self.blocks):
-            x = block(x + pos)
+            x = block(x + pos, padding_mask)
         return x
 
 
@@ -125,12 +156,20 @@ class PointTransformer(nn.Module):
         self.group_size = config.group_size
         self.num_group = config.num_group
         # grouper
-        self.group_divider = Group(num_group=self.num_group, group_size=self.group_size)
+        #self.group_divider = Group(num_group=self.num_group, group_size=self.group_size)
+        self.group_divider = GroupDynamic(num_group_max=self.num_group, group_size=self.group_size)
+        K = self.group_divider.M
+        
         # define the encoder
         self.encoder_dims = config.encoder_dims
         self.encoder = Encoder(encoder_channel=self.encoder_dims)
         # bridge encoder and transformer
         self.reduce_dim = nn.Linear(self.encoder_dims, self.trans_dim)
+        
+        # Non-learnable padding token (ignored in attention)
+        #self.patch_padding = torch.zeros(1, 1, self.trans_dim, device=f"cuda")
+        self.register_buffer("patch_padding", torch.zeros(1, 1, self.trans_dim)) 
+        #self.padding_mask = None
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, self.trans_dim))
         self.cls_pos = nn.Parameter(torch.randn(1, 1, self.trans_dim))
@@ -162,6 +201,10 @@ class PointTransformer(nn.Module):
         # )
 
         # self.build_loss_func()
+        
+        model_size = cal_model_parm_nums(self)
+        print("model size:")
+        print(model_size)
 
     def build_loss_func(self):
         self.loss_ce = nn.CrossEntropyLoss()
@@ -215,25 +258,31 @@ class PointTransformer(nn.Module):
         print_log(f'[Transformer] Successful Loading the ckpt from {bert_ckpt_path}', logger='Transformer')
 
     def forward(self, pts):
-        # divide the point cloud in the same form. This is important
-        neighborhood, center = self.group_divider(pts)
-        # encoder the input cloud blocks
-        group_input_tokens = self.encoder(neighborhood)  # B G N
-        group_input_tokens = self.reduce_dim(group_input_tokens)
-        # prepare cls
-        cls_tokens = self.cls_token.expand(group_input_tokens.size(0), -1, -1)
-        cls_pos = self.cls_pos.expand(group_input_tokens.size(0), -1, -1)
-        # add pos embedding
-        pos = self.pos_embed(center)
-        # final input
-        x = torch.cat((cls_tokens, group_input_tokens), dim=1)
-        pos = torch.cat((cls_pos, pos), dim=1)
-        # transformer
-        x = self.blocks(x, pos)
-        x = self.norm(x)
-        concat_f = torch.cat([x[:, 0], x[:, 1:].max(1)[0]], dim=-1)
-        # ret = self.cls_head_finetune(concat_f)
+        # grouping (one FPS + one k-NN for the whole batch)
+        neigh, center, patch_pad = self.group_divider(pts)        # neigh (B,Gmax,M,C)
+
+        # encode every patch
+        tokens = self.reduce_dim(self.encoder(neigh))             # (B,Gmax,trans)
+
+        # prepend CLS and build the full padding mask
+        cls_tok  = self.cls_token.expand(pts.size(0), -1, -1)     # (B,1,trans)
+        cls_pos  = self.cls_pos.expand_as(cls_tok)
+        pos      = torch.cat([cls_pos, self.pos_embed(center)], 1)
+
+        x        = torch.cat([cls_tok, tokens], 1)                # (B,1+Gmax,trans)
+        cls_pad  = torch.zeros_like(patch_pad[:, :1])             # (B,1)  False
+        pad_full = torch.cat([cls_pad, patch_pad], 1)             # (B,1+Gmax)
+
+        # transformer > norm
+        x = self.norm(self.blocks(x, pos, pad_full))              # (B,1+Gmax,trans)
+
+        # global-max pool on non-padded patches + concat with CLS
+        x_mask = x[:, 1:].masked_fill(patch_pad[:, :, None], float('-inf'))
+        feat   = x_mask.max(dim=1)[0]                             # (B,trans)
+        concat_f = torch.cat([x[:, 0], feat], dim=-1)             # (B,2*trans)
+
         return concat_f
+    
     
 class PointTransformer_Colored(nn.Module):
     def __init__(self, config, **kwargs):
@@ -250,12 +299,18 @@ class PointTransformer_Colored(nn.Module):
         self.group_size = config.group_size
         self.num_group = config.num_group
         # grouper
-        self.group_divider = Group(num_group=self.num_group, group_size=self.group_size)
+        #self.group_divider = Group(num_group=self.num_group, group_size=self.group_size)
+        self.group_divider = GroupDynamic(num_group_max=self.num_group, group_size=self.group_size)
+        
         # define the encoder
         self.encoder_dims = config.encoder_dims
         self.encoder = Encoder(encoder_channel=self.encoder_dims, input_dim=6)
         # bridge encoder and transformer
         self.reduce_dim = nn.Linear(self.encoder_dims, self.trans_dim)
+        
+        # Non-learnable padding token (ignored in attention)
+        #self.patch_padding = torch.zeros(1, 1, self.trans_dim, device="cuda")
+        self.register_buffer("patch_padding", torch.zeros(1, 1, self.trans_dim)) 
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, self.trans_dim))
         self.cls_pos = nn.Parameter(torch.randn(1, 1, self.trans_dim))
@@ -334,22 +389,27 @@ class PointTransformer_Colored(nn.Module):
         print_log(f'[Transformer] Successful Loading the ckpt from {bert_ckpt_path}', logger='Transformer')
 
     def forward(self, pts):
-        # divide the point cloud in the same form. This is important
-        neighborhood, center = self.group_divider(pts)
-        # encoder the input cloud blocks
-        group_input_tokens = self.encoder(neighborhood)  # B G N
-        group_input_tokens = self.reduce_dim(group_input_tokens)
-        # prepare cls
-        cls_tokens = self.cls_token.expand(group_input_tokens.size(0), -1, -1)
-        cls_pos = self.cls_pos.expand(group_input_tokens.size(0), -1, -1)
-        # add pos embedding
-        pos = self.pos_embed(center)
-        # final input
-        x = torch.cat((cls_tokens, group_input_tokens), dim=1)
-        pos = torch.cat((cls_pos, pos), dim=1)
-        # transformer
-        x = self.blocks(x, pos)
-        x = self.norm(x)
-        concat_f = torch.cat([x[:, 0], x[:, 1:].max(1)[0]], dim=-1)
-        # ret = self.cls_head_finetune(concat_f)
+        # grouping (one FPS + one k-NN for the whole batch)
+        neigh, center, patch_pad = self.group_divider(pts)        # neigh (B,Gmax,M,C)
+
+        # encode every patch
+        tokens = self.reduce_dim(self.encoder(neigh))             # (B,Gmax,trans)
+
+        # prepend CLS and build the full padding mask
+        cls_tok  = self.cls_token.expand(pts.size(0), -1, -1)     # (B,1,trans)
+        cls_pos  = self.cls_pos.expand_as(cls_tok)
+        pos      = torch.cat([cls_pos, self.pos_embed(center)], 1)
+
+        x        = torch.cat([cls_tok, tokens], 1)                # (B,1+Gmax,trans)
+        cls_pad  = torch.zeros_like(patch_pad[:, :1])             # (B,1)  False
+        pad_full = torch.cat([cls_pad, patch_pad], 1)             # (B,1+Gmax)
+
+        # transformer > norm
+        x = self.norm(self.blocks(x, pos, pad_full))              # (B,1+Gmax,trans)
+
+        # global-max pool on non-padded patches + concat with CLS
+        x_mask = x[:, 1:].masked_fill(patch_pad[:, :, None], float('-inf'))
+        feat   = x_mask.max(dim=1)[0]                             # (B,trans)
+        concat_f = torch.cat([x[:, 0], feat], dim=-1)             # (B,2*trans)
+
         return concat_f

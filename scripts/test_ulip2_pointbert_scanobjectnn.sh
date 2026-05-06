@@ -12,11 +12,11 @@ CUDA_VISIBLE_DEVICES=0 python main.py \
 --no-distributed \
 --model ULIP2_PointBERT \
 --npoints 8192 \
---workers 32 \
+--workers 10 \
 --linear-projection \
 --output-dir $output_dir \
 --evaluate_3d_ulip2 \
---validate_dataset_name objaverse_lvis_colored \
+--validate_dataset_name scanobjectnn \
 --validate_dataset_prompt modelnet40_64 \
 --test_repeat 1 \
---test_ckpt_addr $model_file 2>&1 | tee $output_dir/log_LVIS.txt
+--test_ckpt_addr $model_file 2>&1 | tee $output_dir/log_scanobjectnn.txt
